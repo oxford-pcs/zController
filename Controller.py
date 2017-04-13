@@ -5,8 +5,8 @@ class ControllerFunctionError(Exception):
 
 class Controller():
   '''
-    This class wraps the functionality from pyZDDE into more convenient 
-    functions.
+    This class wraps some of the functionality from pyZDDE into more convenient 
+    functions, ensuring that the DDE and LDE are always in sync.
   '''
   def __init__(self, zmx_link):
     self.zmx_link = zmx_link
@@ -22,17 +22,24 @@ class Controller():
   def LDEToDDE(self):
     self.zmx_link.zGetRefresh()
     self._updateDDE()
-    
-  def addTiltAndDecentre(self, start_surface_number, end_surface_number, 
-                         x_decentre, y_decentre, x_tilt, y_tilt):
-    cb1, cb2, dummy = self.zmx_link.zTiltDecenterElements(start_surface_number,
-                                                          end_surface_number, 
-                                                          xdec=x_decentre, 
-                                                          ydec=y_decentre, 
+
+  def addTiltAndDecentre(self, start_surf, end_surf, x_c, y_c, x_tilt, y_tilt):   
+    '''
+      Add coordinate breaks for tilt (x_tilt, y_tilt) and decentre (x_c, y_c).
+    '''
+    cb1, cb2, dummy = self.zmx_link.zTiltDecenterElements(start_surf,
+                                                          end_surf, 
+                                                          xdec=x_c, 
+                                                          ydec=y_c, 
                                                           xtilt=x_tilt, 
                                                           ytilt=y_tilt)
     self.DDEToLDE()
     return (cb1, cb2, dummy)
+  
+  def doOptimise(self, nCycles=0):
+    mf_value = self.zmx_link.zOptimize(numOfCycles=nCycles, algorithm=0, 
+                                       timeout=60)
+    return mf_value   
   
   def doRaytrace(self, wave_number=1, mode=0, surf=-1, hx=0, hy=0, px=0, py=0):
     '''
@@ -48,101 +55,166 @@ class Controller():
     '''
     return self.zmx_link.zGetTrace(wave_number, mode, surf, hx, hy, px, py)
 
-  def getSurfaceComment(self, surface_number):
-    return self.zmx_link.zGetSurfaceData(surface_number, self.zmx_link.SDAT_COMMENT) 
+  def getSurfaceComment(self, surf):
+    return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_COMMENT) 
   
-  def getCoordBreakDecentreX(self, surface_number):
-    return self.zmx_link.zGetSurfaceParameter(surface_number, 1)
+  def getCoordBreakDecentreX(self, surf):
+    return self.zmx_link.zGetSurfaceParameter(surf, 1)
   
-  def getCoordBreakDecentreY(self, surface_number):
-    return self.zmx_link.zGetSurfaceParameter(surface_number, 2)
+  def getCoordBreakDecentreY(self, surf):
+    return self.zmx_link.zGetSurfaceParameter(surf, 2)
   
-  def getCoordBreakTiltX(self, surface_number):
-    return self.zmx_link.zGetSurfaceParameter(surface_number, 3)
+  def getCoordBreakTiltX(self, surf):
+    return self.zmx_link.zGetSurfaceParameter(surf, 3)
   
-  def getCoordBreakTiltY(self, surface_number):
-    return self.zmx_link.zGetSurfaceParameter(surface_number, 4)
+  def getCoordBreakTiltY(self, surf):
+    return self.zmx_link.zGetSurfaceParameter(surf, 4)
 
-  def getWavelength(self, wave=0):
-    '''
-      0 is the primary wavelength.
-    '''
-    return self.zmx_link.zGetWave(wave)
+  def getWavelength(self, index_in_wavelength_table=0):
+    return self.zmx_link.zGetWave(index_in_wavelength_table)
 
   def getSystemData(self):
     return self.zmx_link.zGetSystem()
     
-  def getThickness(self, surface_number):
-    return self.zmx_link.zGetSurfaceData(surface_number, self.zmx_link.SDAT_THICK)
+  def getThickness(self, surf):
+    return self.zmx_link.zGetSurfaceData(surf, 
+                                         self.zmx_link.SDAT_THICK)
   
-  def loadFile(self, path):
+  def loadZemaxFile(self, path):
     self.zmx_link.zLoadFile(path)
     self.zmx_link.zPushLens()
     
-  def loadMF(self, filename):
+  def loadMeritFunction(self, filename):
     self.zmx_link.zLoadMerit(filename)
 
-  def optimise(self, nCycles=0):
-    mf_value = self.zmx_link.zOptimize(numOfCycles=nCycles, algorithm=0, timeout=60)
-    return mf_value    
-  
-  def saveMF(self, filename):
+  def saveMeritFunction(self, filename):
     self.zmx_link.zSaveMerit(filename)
-    
-  def setComment(self, surface_number, comment, append=False):
-    if append:
-      old_comment = self.getSurfaceComment(surface_number)
-      if old_comment is not "":
-        comment = comment + ';' + old_comment
-    self.zmx_link.zSetSurfaceData(surface_number, self.zmx_link.SDAT_COMMENT, comment)
-    self.DDEToLDE()
-    
-  def setCoordBreakDecentreX(self, surface_number, value):
-    return self.zmx_link.zSetSurfaceParameter(surface_number, 1, value)
+      
+  def setCoordBreakDecentreX(self, surf, value):
+    return self.zmx_link.zSetSurfaceParameter(surf, 1, value)
   
-  def setCoordBreakDecentreY(self, surface_number, value):
-    return self.zmx_link.zSetSurfaceParameter(surface_number, 2, value)
+  def setCoordBreakDecentreY(self, surf, value):
+    return self.zmx_link.zSetSurfaceParameter(surf, 2, value)
   
-  def setCoordBreakTiltX(self, surface_number, value):
-    return self.zmx_link.zSetSurfaceParameter(surface_number, 3, value)
+  def setCoordBreakTiltX(self, surf, value):
+    return self.zmx_link.zSetSurfaceParameter(surf, 3, value)
   
-  def setCoordBreakTiltY(self, surface_number, value):
-    return self.zmx_link.zSetSurfaceParameter(surface_number, 4, value)  
+  def setCoordBreakTiltY(self, surf, value):
+    return self.zmx_link.zSetSurfaceParameter(surf, 4, value)  
 
-  def setField(self, field_x, field_y, index_in_field_table=1):
-    self.zmx_link.zSetSystemProperty(102, index_in_field_table, field_x)
-    self.zmx_link.zSetSystemProperty(103, index_in_field_table, field_y)
-    self.DDEToLDE() 
-  
-  def setNumberOfFields(self, n_fields):
+  def setFieldNumberOf(self, n_fields):
     self.zmx_link.zSetSystemProperty(101, n_fields)
     self.DDEToLDE()
     
-  def setNumberOfWavelengths(self, n_waves):
+  def setFieldType(self, field_type=0):
+    '''
+      Set field type from enumeration:
+    
+      0   object angle,
+      1   object height, 
+      2   paraxial image height,
+      3   real image height
+    '''
+    if field_type >= 0 or field_type <= 3:
+      self.zmx_link.zSetSystemProperty(100, field_type)  
+    else:
+      raise ControllerFunctionError("Invalid field type", -1)
+  
+  def setFieldValue(self, field_x, field_y, index_in_field_table=1):
+    self.zmx_link.zSetSystemProperty(102, index_in_field_table, field_x)
+    self.zmx_link.zSetSystemProperty(103, index_in_field_table, field_y)
+    self.DDEToLDE()
+    
+  def setSolveCoordBreakDecentres(self, surf, solve_type=1):
+    '''
+      Set solve type for coordinate break decentres from enumeration:
+    
+      0   fixed,
+      1   variable
+    '''
+    if solve_type == 0:
+      stype = self.zmx_link.SOLVE_PAR0_VAR
+    elif solve_type == 1:
+      stype = self.zmx_link.SOLVE_PAR0_FIXED
+    else:
+      raise ControllerFunctionError("Unknown solve type.", -1)
+    
+    self.zmx_link.zSetSolve(surf, self.zmx_link.SOLVE_SPAR_PAR1, stype)
+    self.zmx_link.zSetSolve(surf, self.zmx_link.SOLVE_SPAR_PAR2, stype)
+    self.DDEToLDE()   
+  
+  def setSolveCoordBreakTilts(self, surf, solve_type=1):
+    '''
+      Set solve type for coordinate break tilts from enumeration:
+    
+      0   fixed,
+      1   variable
+    '''  
+    if solve_type == 0:
+      stype = self.zmx_link.SOLVE_PAR0_VAR
+    elif solve_type == 1:
+      stype = self.zmx_link.SOLVE_PAR0_FIXED
+    else:
+      raise ControllerFunctionError("Unknown solve type.", -1)
+    
+    self.zmx_link.zSetSolve(surf, self.zmx_link.SOLVE_SPAR_PAR3, stype)
+    self.zmx_link.zSetSolve(surf, self.zmx_link.SOLVE_SPAR_PAR4, stype)
+    self.DDEToLDE()   
+    
+  def setSurfaceComment(self, surf, comment, append=False):
+    if append:
+      old_comment = self.getSurfaceComment(surf)
+      if old_comment is not "":
+        comment = comment + ';' + old_comment
+    self.zmx_link.zSetSurfaceData(surf, self.zmx_link.SDAT_COMMENT, 
+                                  comment)
+    self.DDEToLDE()
+    
+  def setSurfaceThicknessSolveVariable(self, surf):
+    self.zmx_link.zSetSolve(surf, self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_VAR)
+    self.DDEToLDE()
+
+  def setupFieldsTable(self, fields, field_type=0):
+    '''
+      Populate the fields table with the data from [fields].
+      
+      [fields] must be a list of tuples, (field_x, field_y), in the format of 
+      [field_type] (see setFieldType).
+
+      Returns: Dictionary of field number mapped to physical field.
+    '''
+    self.setNumberOfFields(len(fields))
+    self.setFieldType(field_type)
+    res = {}
+    for index, field in enumerate(fields):
+      self.setField(field[0], field[1], index+1)
+      res[index+1] = (field[0], field[1])
+    return res
+
+  def setupWavelengthsTable(self, wav_start, wav_end, wav_inc):
+    '''
+      Populate the wavelengths table with wavelengths starting from [wav_start],
+      finishing with [wav_end] and with an increment of [wav_inc]. Units, as per
+      Zemax default, are microns.
+      
+      Returns: Dictionary of wavelength number mapped to physical wavelength.
+    '''
+    n_waves = ((wavelength_end - wavelength_start)/wavelength_increment)+1
+    self.setNumberOfWavelengths(n_waves)
+    res = {}
+    for index, wave in enumerate(np.arange(wavelength_start, wavelength_end+
+                                           wavelength_increment, wavelength_end, 
+                                           dtype=Decimal)):
+      self.setWavelength(wave, index+1)
+      res[index+1] = wave
+    return res
+
+  def setWavelengthNumberOf(self, n_waves):
     self.zmx_link.zSetSystemProperty(201, n_waves)
     self.DDEToLDE()
-  
-  def setSurfaceCoordBreakDecentresSolveVariable(self, surface_number):
-    self.zmx_link.zSetSolve(surface_number, self.zmx_link.SOLVE_SPAR_PAR1, self.zmx_link.SOLVE_PAR0_VAR)
-    self.zmx_link.zSetSolve(surface_number, self.zmx_link.SOLVE_SPAR_PAR2, self.zmx_link.SOLVE_PAR0_VAR)
-    self.DDEToLDE()   
-  
-  def setSurfaceCoordBreakTiltsSolveVariable(self, surface_number):
-    self.zmx_link.zSetSolve(surface_number, self.zmx_link.SOLVE_SPAR_PAR3, self.zmx_link.SOLVE_PAR0_VAR)
-    self.zmx_link.zSetSolve(surface_number, self.zmx_link.SOLVE_SPAR_PAR4, self.zmx_link.SOLVE_PAR0_VAR)
-    self.DDEToLDE()   
     
-  def setSurfaceThicknessSolveVariable(self, surface_number):
-    self.zmx_link.zSetSolve(surface_number, self.zmx_link.SOLVE_SPAR_THICK, self.zmx_link.SOLVE_THICK_VAR)
-    self.DDEToLDE()
-    
-  def setWavelength(self, wave, index_in_wavelength_table=1):
+  def setWavelengthValue(self, wave, index_in_wavelength_table=1):
     self.zmx_link.zSetSystemProperty(202, index_in_wavelength_table, wave)
     self.DDEToLDE()
-    
-
-    
-    
-    
-  
     
