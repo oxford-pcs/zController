@@ -70,6 +70,9 @@ class Controller():
   def getCoordBreakTiltY(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 4)
 
+  def getLensData(self):
+    return self.zmx_link.zGetFirst()
+
   def getWavelength(self, index_in_wavelength_table=0):
     return self.zmx_link.zGetWave(index_in_wavelength_table)
 
