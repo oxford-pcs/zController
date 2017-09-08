@@ -6,7 +6,7 @@ class ControllerFunctionError(Exception):
 class Controller():
   '''
     This class wraps some of the functionality from pyZDDE into more convenient 
-    functions, ensuring that the DDE and LDE are always in sync.
+    functions.
   '''
   def __init__(self, zmx_link):
     self.zmx_link = zmx_link
@@ -23,16 +23,153 @@ class Controller():
     self.zmx_link.zGetRefresh()
     self._updateDDE()
 
-  def addTiltAndDecentre(self, start_surf, end_surf, x_c, y_c, x_tilt, y_tilt):   
+  def addTiltAndDecentre(self, start_surf, end_surf, x_c, y_c, x_tilt, y_tilt, order=0):   
     '''
-      Add coordinate breaks for tilt (x_tilt, y_tilt) and decentre (x_c, y_c).
+      Add coordinate breaks for tilt (x_tilt, y_tilt) and decentre (x_c, y_c) 
+      around the front surface.
     '''
-    cb1, cb2, dummy = self.zmx_link.zTiltDecenterElements(start_surf,
-                                                          end_surf, 
-                                                          xdec=x_c, 
-                                                          ydec=y_c, 
-                                                          xtilt=x_tilt, 
-                                                          ytilt=y_tilt)
+    cb1, cb2, dummy = self.addTiltAndDecentreFromPivot(start_surf, end_surf, 
+                                                       0, x_c, y_c, 
+                                                       x_tilt, y_tilt, order)
+    self.DDEToLDE()
+    return (cb1, cb2, dummy)
+  
+  def addTiltAndDecentreAboutPivot(self, firstSurf, lastSurf, pivot_z=0, x_c=0.0, y_c=0.0, x_tilt=0.0, y_tilt=0.0, order=0):
+    '''
+      A tilt and decentre can be constructed by the following sequence:
+      
+      - Add a new surface, s1, with thickness set to the distance to the pivot 
+        from the front of the lens.
+      - Add coordinate break with tilts/decentres, with a thickness returning 
+        from the excursion of s1 (PICKUP with a scale of -1).
+      - Add surfaces between start_surf and end_surf
+      - Thickness on last surface of lens is replaced with a position solve 
+        to the position of the pivot, i.e. cb1.
+      - Add a second coordinate break, cb2, returning to the original coordinate 
+        system, the thickness of which is picked up from the last surface (which
+        moved from the rear of the lens to the pivot) as the inverse, thus 
+        moving to the rear surface of the lens again.
+      - Add a dummy surface, dummy, after the second coordinate break with a 
+        thickness of the original last surface.
+          
+      order:
+      
+        0 = decenter then tilt
+        1 = tilt then decenter
+        
+    ''' 
+    
+    numSurfBetweenCBs = lastSurf - firstSurf + 1
+    
+    # Define new surface numbers
+    s1 = firstSurf
+    cb1 = firstSurf + 1
+    cb2 = cb1 + numSurfBetweenCBs + 1
+    dummy = cb2 + 1
+    
+    # Store the thickness and solve on thickness (if any) of the last surface 
+    thick = self.zmx_link.zGetSurfaceData(surfNum=lastSurf, 
+                                          code=self.zmx_link.SDAT_THICK)
+    solve = self.zmx_link.zGetSolve(surfNum=lastSurf, 
+                                    code=self.zmx_link.SOLVE_SPAR_THICK)
+    
+    # Insert required surfaces
+    self.zmx_link.zInsertSurface(surfNum=s1)  # Movement to pivot
+    self.zmx_link.zInsertSurface(surfNum=cb1) # 1st cb
+    self.zmx_link.zInsertSurface(surfNum=cb2) # 2nd cb to restore axes
+    self.zmx_link.zInsertSurface(surfNum=dummy) # Dummy after 2nd cb for dist
+    
+    # Add comments to surfaces
+    self.zmx_link.zSetSurfaceData(surfNum=s1, code=self.zmx_link.SDAT_COMMENT,
+                                  value="Move to pivot")
+    self.zmx_link.zSetSurfaceData(surfNum=cb1, code=self.zmx_link.SDAT_COMMENT, 
+                                  value='Element tilt and return from pivot')
+    self.zmx_link.zSetSurfaceData(surfNum=cb1, code=self.zmx_link.SDAT_TYPE, 
+                                  value='COORDBRK')
+    self.zmx_link.zSetSurfaceData(surfNum=cb2, code=self.zmx_link.SDAT_COMMENT, 
+                                  value='Element tilt return and move to rear')
+    self.zmx_link.zSetSurfaceData(surfNum=cb2, code=self.zmx_link.SDAT_TYPE, 
+                                  value='COORDBRK')
+    self.zmx_link.zSetSurfaceData(surfNum=cb2, code=self.zmx_link.SDAT_COMMENT, 
+                                  value='Return to pivot')
+    self.zmx_link.zSetSurfaceData(surfNum=dummy, code=self.zmx_link.SDAT_COMMENT, 
+                                  value='Dummy distance')
+        
+    # Transfer thickness of the surface just before the cb2 (originally 
+    # lastSurf) to the dummy surface to retain inter-lens distance
+    lastSurf += 2  # last surface number incremented by 2 because of cb1+s1
+    self.zmx_link.zSetSurfaceData(surfNum=lastSurf, 
+                                  code=self.zmx_link.SDAT_THICK, 
+                                  value=0.0)
+    self.zmx_link.zSetSolve(lastSurf, 
+                            self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_FIXED)
+    self.zmx_link.zSetSurfaceData(surfNum=dummy, 
+                                  code=self.zmx_link.SDAT_THICK, 
+                                  value=thick)
+    
+    # Transfer the solve on the thickness (if any) of the surface just before
+    # the cb2 (originally lastSurf) to the dummy surface. The param1 of 
+    # solve type "Thickness" may need to be modified before transferring.
+    if solve[0] in {5, 7, 8, 9}: # param1 is a integer surface number
+        param1 = int(solve[1]) if solve[1] < cb1 else int(solve[1]) + 1
+    else: # param1 is a floating value, or macro name
+        param1 = solve[1]
+    self.zmx_link.zSetSolve(dummy, self.zmx_link.SOLVE_SPAR_THICK, solve[0], 
+                            param1, solve[2], solve[3], solve[4])
+    
+    # Use pick-up solve on glass surface of dummy to pickup from lastSurf
+    self.zmx_link.zSetSolve(dummy, self.zmx_link.SOLVE_SPAR_GLASS, 
+                            self.zmx_link.SOLVE_GLASS_PICKUP,
+                            lastSurf)
+    
+    # Use pick-up solves on second CB; set scale factor of -1 to lock the second
+    # cb to the first.
+    pickupcolumns = range(6, 11)
+    params = [self.zmx_link.SOLVE_SPAR_PAR1, self.zmx_link.SOLVE_SPAR_PAR2, 
+              self.zmx_link.SOLVE_SPAR_PAR3, self.zmx_link.SOLVE_SPAR_PAR4, 
+              self.zmx_link.SOLVE_SPAR_PAR5]
+    offset, scale = 0, -1
+    for para, pcol in zip(params, pickupcolumns):
+        self.zmx_link.zSetSolve(cb2, para, self.zmx_link.SOLVE_PARn_PICKUP, 
+                                cb1, offset, scale, pcol)   
+        
+    # Set thickness of s1 to be the pivot point    
+    self.zmx_link.zSetSolve(s1, self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_FIXED)
+    self.zmx_link.zSetSurfaceData(surfNum=s1, code=self.zmx_link.SDAT_THICK, 
+                                  value=pivot_z)
+    
+    # Use thickness pickup on cb1 to trace back from the pivot point to 
+    # where the lens will start
+    self.zmx_link.zSetSolve(cb1, self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_PICKUP, s1, -1, 0, 0)
+    
+    # Use thickness position solve on lastSurf to track back to the pivot point 
+    # (where cb1 is) after lenses have been constructed
+    self.zmx_link.zSetSolve(lastSurf, self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_POS, cb1, 0)
+    
+    # Use inverse pickup thickness solve on cb2 to restore position to lastSurf
+    self.zmx_link.zSetSolve(cb2, self.zmx_link.SOLVE_SPAR_THICK, 
+                            self.zmx_link.SOLVE_THICK_PICKUP, lastSurf, -1, 0, 
+                            0)
+    
+    # Set the appropriate orders on the surfaces
+    if order:
+        cb1Ord, cb2Ord = 1, 0
+    else:
+        cb1Ord, cb2Ord = 0, 1
+    self.zmx_link.zSetSurfaceParameter(surfNum=cb1, param=6, value=cb1Ord)    
+    self.zmx_link.zSetSurfaceParameter(surfNum=cb2, param=6, value=cb2Ord)
+    
+    # Set the decenter and tilt values in the first cb
+    params = range(1, 6)
+    values = [x_c, y_c, x_tilt, y_tilt, 0]
+    for par, val in zip(params, values):
+        self.zmx_link.zSetSurfaceParameter(surfNum=cb1, param=par, value=val)
+    self.zmx_link.zGetUpdate()
+    
     self.DDEToLDE()
     return (cb1, cb2, dummy)
   
@@ -86,6 +223,9 @@ class Controller():
   def loadZemaxFile(self, path):
     self.zmx_link.zLoadFile(path)
     self.zmx_link.zPushLens()
+
+  def saveZemaxFile(self, path):
+    self.zmx_link.zSaveFile(path) 
     
   def loadMeritFunction(self, filename):
     self.zmx_link.zLoadMerit(filename)
@@ -136,9 +276,9 @@ class Controller():
       1   variable
     '''
     if solve_type == 0:
-      stype = self.zmx_link.SOLVE_PAR0_VAR
-    elif solve_type == 1:
       stype = self.zmx_link.SOLVE_PAR0_FIXED
+    elif solve_type == 1:
+      stype = self.zmx_link.SOLVE_PAR0_VAR
     else:
       raise ControllerFunctionError("Unknown solve type.", -1)
     
@@ -154,9 +294,9 @@ class Controller():
       1   variable
     '''  
     if solve_type == 0:
-      stype = self.zmx_link.SOLVE_PAR0_VAR
-    elif solve_type == 1:
       stype = self.zmx_link.SOLVE_PAR0_FIXED
+    elif solve_type == 1:
+      stype = self.zmx_link.SOLVE_PAR0_VAR
     else:
       raise ControllerFunctionError("Unknown solve type.", -1)
     
