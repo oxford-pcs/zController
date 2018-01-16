@@ -1,3 +1,5 @@
+import numpy as np
+
 class ControllerFunctionError(Exception):
   def __init__(self, message, error):
     super(Exception, self).__init__(message)
@@ -192,6 +194,40 @@ class Controller():
     '''
     return self.zmx_link.zGetTrace(wave_number, mode, surf, hx, hy, px, py)
 
+  def doRayTraceForFields(self, fields, field_type=1, px=0, py=0):
+    '''
+      Trace rays for list of tupled fields [fields] with type [field_type] 
+      (defined in setFieldType()).
+
+      The output is in local coordinates for the surface defined by 
+      [surf] in the doRayTrace() call.
+    '''
+    
+    self.setupFieldsTable(fields, field_type)
+
+    max_radial_field_index = np.argmax([np.sqrt((xy[0]**2)+(xy[1]**2)) 
+                                        for xy in fields]) 
+    max_radial_field_xy = fields[max_radial_field_index]
+    max_radial_field_value = np.sqrt((max_radial_field_xy[0]**2)+ \
+      (max_radial_field_xy[1]**2))
+    
+    rays = []
+    for idx, oh in enumerate(fields):
+      if max_radial_field_value == 0:
+        this_hx = 0
+        this_hy = 0
+      else:
+        this_hx = oh[0]/max_radial_field_value
+        this_hy = oh[1]/max_radial_field_value
+        
+      rays.append(self.doRaytrace(wave_number=1, mode=0, surf=-1, 
+                                  hx=this_hx, hy=this_hy, px=px, py=py))
+      
+    return rays
+
+  def getAnalysisWFE(self):
+    pass
+
   def getSurfaceComment(self, surf):
     return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_COMMENT) 
   
@@ -245,7 +281,7 @@ class Controller():
   def setCoordBreakTiltY(self, surf, value):
     return self.zmx_link.zSetSurfaceParameter(surf, 4, value)  
 
-  def setFieldNumberOf(self, n_fields):
+  def setFieldsNumberOf(self, n_fields):
     self.zmx_link.zSetSystemProperty(101, n_fields)
     self.DDEToLDE()
     
@@ -327,11 +363,11 @@ class Controller():
 
       Returns: Dictionary of field number mapped to physical field.
     '''
-    self.setNumberOfFields(len(fields))
+    self.setFieldsNumberOf(len(fields))
     self.setFieldType(field_type)
     res = {}
     for index, field in enumerate(fields):
-      self.setField(field[0], field[1], index+1)
+      self.setFieldValue(field[0], field[1], index+1)
       res[index+1] = (field[0], field[1])
     return res
 
@@ -344,12 +380,12 @@ class Controller():
       Returns: Dictionary of wavelength number mapped to physical wavelength.
     '''
     n_waves = ((wavelength_end - wavelength_start)/wavelength_increment)+1
-    self.setNumberOfWavelengths(n_waves)
+    self.setWavelengthsNumberOf(n_waves)
     res = {}
     for index, wave in enumerate(np.arange(wavelength_start, wavelength_end+
                                            wavelength_increment, wavelength_end, 
                                            dtype=Decimal)):
-      self.setWavelength(wave, index+1)
+      self.setWavelengthValue(wave, index+1)
       res[index+1] = wave
     return res
 
