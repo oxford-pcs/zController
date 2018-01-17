@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 class ControllerFunctionError(Exception):
   def __init__(self, message, error):
@@ -7,8 +8,8 @@ class ControllerFunctionError(Exception):
 
 class Controller():
   '''
-    This class wraps some of the functionality from pyZDDE into more convenient 
-    functions.
+    This class wraps some of the controller functionality from pyZDDE into more 
+    convenient functions.
   '''
   def __init__(self, zmx_link):
     self.zmx_link = zmx_link
@@ -194,43 +195,55 @@ class Controller():
     '''
     return self.zmx_link.zGetTrace(wave_number, mode, surf, hx, hy, px, py)
 
-  def doRayTraceForFields(self, fields, field_type=1, px=0, py=0):
+  def doRayTraceForFields(self, fields, field_type, px=0, py=0):
     '''
-      Trace rays for list of tupled fields [fields] with type [field_type] 
-      (defined in setFieldType()).
+      Trace rays for fields [fields] of type [field_type].
+      
+      This routine circumvents the 12 field limitation.
 
       The output is in local coordinates for the surface defined by 
       [surf] in the doRayTrace() call.
     '''
     
-    self.setupFieldsTable(fields, field_type)
-
+    # find the maximum radial field coordinates, required to define hx and hy, 
+    # the normalised field coordinates.
+    #
     max_radial_field_index = np.argmax([np.sqrt((xy[0]**2)+(xy[1]**2)) 
                                         for xy in fields]) 
     max_radial_field_xy = fields[max_radial_field_index]
     max_radial_field_value = np.sqrt((max_radial_field_xy[0]**2)+ \
       (max_radial_field_xy[1]**2))
     
+    # set up a field table with two fields, [0, 0] and [max_radial_field_x, 
+    # max_radial_field_y].
+    #
+    self.setFieldsTable([(0,0), 
+                         (max_radial_field_xy[0], max_radial_field_xy[1])], 
+                        field_type=field_type)
+    
+    # now ray trace each field in [fields] normalised by the 
+    # max_radial_field_value
+    #
     rays = []
-    for idx, oh in enumerate(fields):
+    for idx, f in enumerate(fields):
       if max_radial_field_value == 0:
         this_hx = 0
         this_hy = 0
       else:
-        this_hx = oh[0]/max_radial_field_value
-        this_hy = oh[1]/max_radial_field_value
-        
-      rays.append(self.doRaytrace(wave_number=1, mode=0, surf=-1, 
-                                  hx=this_hx, hy=this_hy, px=px, py=py))
-      
+        this_hx = f[0]/max_radial_field_value
+        this_hy = f[1]/max_radial_field_value
+
+      ray = self.doRaytrace(wave_number=1, mode=0, surf=-1, 
+                            hx=this_hx, hy=this_hy, px=px, py=py)
+      rays.append(ray)
+     
     return rays
 
   def getAnalysisWFE(self):
-    pass
+    print self.zmx_link.zModifySettings("settings_file", "WFM_SAM", 2)
+    print self.zmx_link.zGetTextFile("C:\\Users\\Barnsley\\Desktop\\test.test", "Wfm",  settingsFile=settings_file, flag=2, 
+                               timeout=None)
 
-  def getSurfaceComment(self, surf):
-    return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_COMMENT) 
-  
   def getCoordBreakDecentreX(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 1)
   
@@ -243,18 +256,29 @@ class Controller():
   def getCoordBreakTiltY(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 4)
 
+  def getField(self, index_in_fields_table=0):
+    return self.zmx_link.zGetField(index_in_fields_table)  
+
   def getLensData(self):
     return self.zmx_link.zGetFirst()
 
-  def getWavelength(self, index_in_wavelength_table=0):
-    return self.zmx_link.zGetWave(index_in_wavelength_table)
+  def getSurfaceComment(self, surf):
+    return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_COMMENT) 
 
+  def getSurfaceThickness(self, surf):
+    return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_THICK)
+  
   def getSystemData(self):
     return self.zmx_link.zGetSystem()
     
-  def getThickness(self, surf):
-    return self.zmx_link.zGetSurfaceData(surf, 
-                                         self.zmx_link.SDAT_THICK)
+  def getWavelength(self, index_in_wavelengths_table=0):
+    return self.zmx_link.zGetWave(index_in_wavelengths_table)  
+  
+  def isFileAlreadyLoaded(self, file_pathname):
+    if self.zmx_link.zGetFile() == file_pathname:
+      return True
+    else:
+      return False
   
   def loadZemaxFile(self, path):
     self.zmx_link.zLoadFile(path)
@@ -281,7 +305,12 @@ class Controller():
   def setCoordBreakTiltY(self, surf, value):
     return self.zmx_link.zSetSurfaceParameter(surf, 4, value)  
 
-  def setFieldsNumberOf(self, n_fields):
+  def setFieldsNumberOf(self, n_fields): 
+    try:
+      assert n_fields <= 12
+    except AssertionError:
+      print "WARNING: Tried to insert too many fields into field table,",
+      print "entries will be truncated"
     self.zmx_link.zSetSystemProperty(101, n_fields)
     self.DDEToLDE()
     
@@ -303,6 +332,23 @@ class Controller():
     self.zmx_link.zSetSystemProperty(102, index_in_field_table, field_x)
     self.zmx_link.zSetSystemProperty(103, index_in_field_table, field_y)
     self.DDEToLDE()
+    
+  def setFieldsTable(self, fields, field_type=0):
+    '''
+      Populate the fields table with the data from [fields].
+      
+      [fields] must be a list of tuples, (field_x, field_y), in the format of 
+      [field_type] (see setFieldType). The number of fields is limited to 12.
+
+      Returns dictionary of field number mapped to physical field.
+    '''
+    self.setFieldsNumberOf(len(fields))
+    self.setFieldType(field_type)
+    res = {}
+    for index, field in enumerate(fields):
+      self.setFieldValue(field[0], field[1], index+1)
+      res[index+1] = (field[0], field[1])
+    return res    
     
   def setSolveCoordBreakDecentres(self, surf, solve_type=1):
     '''
@@ -354,30 +400,26 @@ class Controller():
                             self.zmx_link.SOLVE_THICK_VAR)
     self.DDEToLDE()
 
-  def setupFieldsTable(self, fields, field_type=0):
-    '''
-      Populate the fields table with the data from [fields].
-      
-      [fields] must be a list of tuples, (field_x, field_y), in the format of 
-      [field_type] (see setFieldType).
-
-      Returns: Dictionary of field number mapped to physical field.
-    '''
-    self.setFieldsNumberOf(len(fields))
-    self.setFieldType(field_type)
-    res = {}
-    for index, field in enumerate(fields):
-      self.setFieldValue(field[0], field[1], index+1)
-      res[index+1] = (field[0], field[1])
-    return res
-
-  def setupWavelengthsTable(self, wav_start, wav_end, wav_inc):
+  def setWavelengthNumberOf(self, n_waves):
+    try:
+      assert n_waves <= 24
+    except AssertionError:
+      print "WARNING: Tried to insert too many wavelengths into field table,",
+      print "entries will be truncated..."
+    self.zmx_link.zSetSystemProperty(201, n_waves)
+    self.DDEToLDE()
+    
+  def setWavelengthValue(self, wave, index_in_wavelength_table=1):
+    self.zmx_link.zSetSystemProperty(202, index_in_wavelength_table, wave)
+    self.DDEToLDE()
+    
+  def setWavelengthsTable(self, wav_start, wav_end, wav_inc):
     '''
       Populate the wavelengths table with wavelengths starting from [wav_start],
       finishing with [wav_end] and with an increment of [wav_inc]. Units, as per
-      Zemax default, are microns.
+      Zemax default, are microns. The number of wavelengths is limited to 24.
       
-      Returns: Dictionary of wavelength number mapped to physical wavelength.
+      Returns a dictionary of wavelength number mapped to physical wavelength.
     '''
     n_waves = ((wavelength_end - wavelength_start)/wavelength_increment)+1
     self.setWavelengthsNumberOf(n_waves)
@@ -388,12 +430,3 @@ class Controller():
       self.setWavelengthValue(wave, index+1)
       res[index+1] = wave
     return res
-
-  def setWavelengthNumberOf(self, n_waves):
-    self.zmx_link.zSetSystemProperty(201, n_waves)
-    self.DDEToLDE()
-    
-  def setWavelengthValue(self, wave, index_in_wavelength_table=1):
-    self.zmx_link.zSetSystemProperty(202, index_in_wavelength_table, wave)
-    self.DDEToLDE()
-    
