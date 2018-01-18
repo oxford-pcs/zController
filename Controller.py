@@ -1,5 +1,8 @@
 import numpy as np
 import os
+import tempfile
+
+from Parser import *
 
 class ControllerFunctionError(Exception):
   def __init__(self, message, error):
@@ -195,9 +198,10 @@ class Controller():
     '''
     return self.zmx_link.zGetTrace(wave_number, mode, surf, hx, hy, px, py)
 
-  def doRayTraceForFields(self, fields, field_type, px=0, py=0):
+  def doRayTraceForFields(self, fields, field_type, wave_number=1, px=0, py=0):
     '''
-      Trace rays for fields [fields] of type [field_type].
+      Trace rays for fields [fields] of type [field_type] at wavelength 
+      [wave_number] as defined in the wavelength data editor.
       
       This routine circumvents the 12 field limitation.
 
@@ -233,16 +237,88 @@ class Controller():
         this_hx = f[0]/max_radial_field_value
         this_hy = f[1]/max_radial_field_value
 
-      ray = self.doRaytrace(wave_number=1, mode=0, surf=-1, 
+      ray = self.doRaytrace(wave_number=wave_number, mode=0, surf=-1, 
                             hx=this_hx, hy=this_hy, px=px, py=py)
       rays.append(ray)
      
     return rays
 
-  def getAnalysisWFE(self):
-    print self.zmx_link.zModifySettings("settings_file", "WFM_SAM", 2)
-    print self.zmx_link.zGetTextFile("C:\\Users\\Barnsley\\Desktop\\test.test", "Wfm",  settingsFile=settings_file, flag=2, 
-                               timeout=None)
+  def getAnalysisWFE(self, field_number=1, wave_number=1, sampling=4):
+    '''
+      Returns a parsed WFE map for field [field_idx] and wavelength 
+      [wave_number] as defined in the wavelength data editor.
+      
+      The WFE map sampling, [sampling], is 1 indexed, i.e.
+      
+      1 = 32 x 32
+      2 = 64 x 64
+      3 = 128 x 128
+      .
+      .
+      Returns both the data and file header.
+    '''
+    fp_wfe, fp_wfe_filename = tempfile.mkstemp(suffix=".test")
+    fp_wfe_settings, fp_wfe_settings_filename = tempfile.mkstemp(suffix=".CFG")
+    try:
+      # this first call generates a settings file that can be modified later
+      assert self.zmx_link.zGetTextFile(fp_wfe_filename, "Wfm", 
+                                        fp_wfe_settings_filename, 
+                                        flag=0, timeout=None) == 0
+      assert self.zmx_link.zModifySettings(fp_wfe_settings_filename, 
+                                          "WFM_SAMP", 4) == 0
+      assert self.zmx_link.zModifySettings(fp_wfe_settings_filename, 
+                                           "WFM_FIELD", 
+                                          field_number) == 0
+      assert self.zmx_link.zModifySettings(fp_wfe_settings_filename, 
+                                           "WFM_WAVE", 
+                                          wave_number) == 0
+      assert self.zmx_link.zGetTextFile(fp_wfe_filename, "Wfm", 
+                                        fp_wfe_settings_filename, 
+                                        flag=1, timeout=None) == 0
+    except AssertionError:
+      print "FATAL: Failed to construct WFE map."
+      os.close(fp_wfe)
+      os.close(fp_wfe_settings)
+      return False
+    
+    wfe_parsed = zCWFE(fp_wfe_filename, verbose=False)
+    try:
+      assert wfe_parsed.parse() == True
+    except AssertionError:
+      print "FATAL: Failed to parse WFE map in Python data structures."
+      os.close(fp_wfe)
+      os.close(fp_wfe_settings)
+      return False  
+        
+    os.close(fp_wfe)
+    os.close(fp_wfe_settings)
+    
+    return wfe_parsed.getData(), wfe_parsed.getHeader()
+
+  def getAnalysisWFEForFields(self, fields, field_type, wave_number=1, sampling=4):
+    '''
+      Get WFE maps for for fields [fields] of type [field_type] with wavelength 
+      [wave_number] as defined in the wavelength data editor.
+      
+      This routine circumvents the 12 field limitation.
+    '''
+    
+    # set up one field in the table
+    #
+    self.setFieldsNumberOf(1)
+    self.setFieldType(field_type)
+    
+    # now get the WFE for each field point.
+    #
+    wfe_data = []
+    wfe_headers = []
+    for idx, f in enumerate(fields):
+      self.setFieldValue(f[0], f[1])
+      self.getAnalysisWFE()
+      wfe_data.append(wfe_data)
+      wfe_headers.append(wfe_headers)
+     
+    return wfe_data, wfe_headers
 
   def getCoordBreakDecentreX(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 1)
@@ -256,8 +332,8 @@ class Controller():
   def getCoordBreakTiltY(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 4)
 
-  def getField(self, index_in_fields_table=0):
-    return self.zmx_link.zGetField(index_in_fields_table)  
+  def getField(self, field_number=0):
+    return self.zmx_link.zGetField(field_number)  
 
   def getLensData(self):
     return self.zmx_link.zGetFirst()
@@ -271,8 +347,8 @@ class Controller():
   def getSystemData(self):
     return self.zmx_link.zGetSystem()
     
-  def getWavelength(self, index_in_wavelengths_table=0):
-    return self.zmx_link.zGetWave(index_in_wavelengths_table)  
+  def getWavelength(self, wave_number=0):
+    return self.zmx_link.zGetWave(wave_number)  
   
   def isFileAlreadyLoaded(self, file_pathname):
     if self.zmx_link.zGetFile() == file_pathname:
@@ -328,9 +404,9 @@ class Controller():
     else:
       raise ControllerFunctionError("Invalid field type", -1)
   
-  def setFieldValue(self, field_x, field_y, index_in_field_table=1):
-    self.zmx_link.zSetSystemProperty(102, index_in_field_table, field_x)
-    self.zmx_link.zSetSystemProperty(103, index_in_field_table, field_y)
+  def setFieldValue(self, field_x, field_y, field_number=1):
+    self.zmx_link.zSetSystemProperty(102, field_number, field_x)
+    self.zmx_link.zSetSystemProperty(103, field_number, field_y)
     self.DDEToLDE()
     
   def setFieldsTable(self, fields, field_type=0):
@@ -409,8 +485,8 @@ class Controller():
     self.zmx_link.zSetSystemProperty(201, n_waves)
     self.DDEToLDE()
     
-  def setWavelengthValue(self, wave, index_in_wavelength_table=1):
-    self.zmx_link.zSetSystemProperty(202, index_in_wavelength_table, wave)
+  def setWavelengthValue(self, wave, wave_number=1):
+    self.zmx_link.zSetSystemProperty(202, wave_number, wave)
     self.DDEToLDE()
     
   def setWavelengthsTable(self, wav_start, wav_end, wav_inc):
