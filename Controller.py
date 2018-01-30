@@ -295,7 +295,8 @@ class Controller():
     
     return wfe_parsed.getData(), wfe_parsed.getHeader()
 
-  def getAnalysisWFEForFields(self, fields, field_type, wave_number=1, sampling=4):
+  def getAnalysisWFEForFields(self, fields, field_type, wave_number=1, 
+                              sampling=4):
     '''
       Get WFE maps for for fields [fields] of type [field_type] with wavelength 
       [wave_number] as defined in the wavelength data editor.
@@ -310,15 +311,15 @@ class Controller():
     
     # now get the WFE for each field point.
     #
-    wfe_data = []
-    wfe_headers = []
+    WFE_DATA = []
+    WFE_HEADERS = []
     for idx, f in enumerate(fields):
       self.setFieldValue(f[0], f[1])
-      self.getAnalysisWFE()
-      wfe_data.append(wfe_data)
-      wfe_headers.append(wfe_headers)
+      wfe_data, wfe_headers = self.getAnalysisWFE(sampling=sampling)
+      WFE_DATA.append(wfe_data)
+      WFE_HEADERS.append(wfe_headers)
      
-    return wfe_data, wfe_headers
+    return WFE_DATA, WFE_HEADERS
 
   def getCoordBreakDecentreX(self, surf):
     return self.zmx_link.zGetSurfaceParameter(surf, 1)
@@ -337,6 +338,9 @@ class Controller():
 
   def getLensData(self):
     return self.zmx_link.zGetFirst()
+
+  def getPupilData(self):
+    return self.zmx_link.zGetPupil()
 
   def getSurfaceComment(self, surf):
     return self.zmx_link.zGetSurfaceData(surf, self.zmx_link.SDAT_COMMENT) 

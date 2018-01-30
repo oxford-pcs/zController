@@ -150,7 +150,7 @@ class zCSystemData():
         elif "Entrance Pupil Diameter" in line.split(':')[0]:
           self.header['EPD'] = float(line.split(':')[1].strip())
     if None in self.header.viewvalues():		# it's fully populated
-	  return False
+      return False
     return True
   
   def getHeader(self):
@@ -230,7 +230,7 @@ class zCWFE():
         self.header['CENTRE'] = (int(line.split()[4].rstrip(',').strip()), 
                                   int(line.split()[6].strip()))
     if None in self.header.viewvalues():		# it's fully populated
-	  return False
+      return False
     return True
 
   def getData(self):
