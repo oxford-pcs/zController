@@ -60,8 +60,14 @@ class zCFFftPsf():
           self.header['WAVE_EXP'] = 1e-6
         elif unicode(line.split()[1].rstrip(',').strip()) == u'nm':
           self.header['WAVE_EXP'] = 1e-9
-        self.header['FIELD'] = (float(line.split()[3].rstrip(',').strip()), 
-                                float(line.split()[4].strip()))
+
+        # need the following as Zemax writes a zero X field as a single   
+        # value, but a zero Y field is written still as (X, 0.)
+        try:  
+          self.header['FIELD'] = (float(line.split()[3].rstrip(',').strip()), 
+                                  float(line.split()[4].strip()))
+        except ValueError:
+          self.header['FIELD'] = (0, float(line.split()[3].strip()))
       elif idx == 9:
         self.header['DATA_SPACING'] = float(line.split()[3].strip())
         if unicode(line.split()[4].rstrip('.').strip()) == u'm':
@@ -215,8 +221,14 @@ class zCWFE():
           self.header['WAVE_EXP'] = Decimal('1e-6')
         elif unicode(line.split()[1].rstrip(',').strip()) == u'nm':
           self.header['WAVE_EXP'] = Decimal('1e-9')
-        self.header['FIELD'] = (float(line.split()[3].rstrip(',').strip()), 
-                                float(line.split()[4].strip()))
+
+        # need the following as Zemax writes a zero X field as a single   
+        # value, but a zero Y field is written still as (X, 0.)
+        try:  
+          self.header['FIELD'] = (float(line.split()[3].rstrip(',').strip()), 
+                                  float(line.split()[4].strip()))
+        except ValueError:
+          self.header['FIELD'] = (0, float(line.split()[3].strip()))
       elif idx == 9:
         self.header['P2V'] = float(line.split()[4].strip())
         self.header['RMS'] = float(line.split()[8].strip())

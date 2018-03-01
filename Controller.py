@@ -265,7 +265,7 @@ class Controller():
                                         fp_wfe_settings_filename, 
                                         flag=0, timeout=None) == 0
       assert self.zmx_link.zModifySettings(fp_wfe_settings_filename, 
-                                          "WFM_SAMP", 4) == 0
+                                          "WFM_SAMP", sampling) == 0
       assert self.zmx_link.zModifySettings(fp_wfe_settings_filename, 
                                            "WFM_FIELD", 
                                           field_number) == 0
