@@ -361,6 +361,10 @@ class Controller():
       return False
   
   def loadZemaxFile(self, path):
+    if not os.path.exists(path):
+      print "ERROR: " + path
+      print "ERROR: Zemax file doesn't exist. Make sure it has an absolute pathname."
+      exit(0)
     self.zmx_link.zLoadFile(path)
     self.zmx_link.zPushLens()
 
